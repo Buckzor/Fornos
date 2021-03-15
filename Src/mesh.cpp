@@ -637,6 +637,12 @@ Mesh* Mesh::loadFBX(const char *path)
 		//Mesh* p_cy_mesh = fbx_add_mesh(scene, transform_identity());
 		//p_cy_mesh->reserve_mesh(vertex_num, triangle_num);
 		int uv_channel_idx = mesh_ptr->GetNumUVChannels() - 1;
+
+		if (uv_channel_idx != 1)
+		{
+			logError("Load FBX", "uv1 is not baking channel!");
+		}
+
 		int vertex_num = mesh_ptr->mNumVertices;		
 
 		for (int i = 0; i < vertex_num; ++i)
@@ -677,6 +683,7 @@ Mesh * Mesh::loadFile(const char * path)
 {
 	if (endsWith(path, ".obj")) return loadWavefrontObj(path);
 	if (endsWith(path, ".ply")) return loadPly(path);
+	if (endsWith(path, ".fbx") || endsWith(path, ".FBX")) return loadFBX(path);
 	return nullptr;
 }
 

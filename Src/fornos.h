@@ -84,6 +84,7 @@ struct FornosParameters_SolverAO
 	float minDistance = 0.01f;
 	float maxDistance = 10.0f;
 	std::string outputPath;
+	std::string inputDiffuseImgPath;
 
 	bool ready() { return enabled && !outputPath.empty(); }
 };

@@ -337,7 +337,7 @@ void FornosParameters_Shared_View::render(int windowWidth, int windowHeight)
 	parameter_openFile("Low Mesh", &loPolyPath, "##lo",
 		"Low resolution mesh file.\n"
 		"Wavefront OBJ files supported.",
-		"Select Low-Poly Mesh", ".obj",
+		"Select Low-Poly Mesh", ".obj;.fbx",
 		windowWidth, windowHeight);
 
 	parameter<NormalImport>("Normals", &data->loPolyMeshNormal, normalImportNames, 3, "#lowPolyNormal",
@@ -347,7 +347,7 @@ void FornosParameters_Shared_View::render(int windowWidth, int windowHeight)
 		"Optional high resolution mesh file.\n"
 		"If not setup it will bake the low resolution mesh.\n"
 		"Wavefront OBJ files supported.",
-		"Select Hiigh-Poly Mesh", ".obj",
+		"Select Hiigh-Poly Mesh", ".obj;.fbx",
 		windowWidth, windowHeight);
 
 	parameter<NormalImport>("Normals", &data->hiPolyMeshNormal, normalImportNames, 3, "#hiPolyNormal",
@@ -545,6 +545,7 @@ public:
 	FornosParameters_SolverAO_View(FornosParameters_SolverAO *data)
 		: data(data)
 		, path(&data->outputPath)
+		, diffuseImagePath(&data->inputDiffuseImgPath)
 	{
 	}
 
@@ -552,6 +553,7 @@ public:
 private:
 	FornosParameters_SolverAO *data;
 	PathField path;
+	PathField diffuseImagePath;
 };
 
 void FornosParameters_SolverAO_View::render(int windowWidth, int windowHeight)
@@ -574,6 +576,12 @@ void FornosParameters_SolverAO_View::render(int windowWidth, int windowHeight)
 		parameter_saveFile("Output", &path, "##ao",
 			"Ambient occlusion image output file.",
 			"Ambient Occlusion Map", ".png;.tga;.exr",
+			windowWidth, windowHeight);
+
+		parameter_openFile("Diffuse Image With Alpha", &diffuseImagePath, "##diffmap",
+			"Ambient occlusion image input diffuse file. \n"
+			"Diffuse map with alpha",
+			"Select diffuse map:", ".png;.tga;.exr",
 			windowWidth, windowHeight);
 
 		parameter("Sample count", &data->sampleCount, "##aoSampleCount",
