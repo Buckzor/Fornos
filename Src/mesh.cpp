@@ -35,6 +35,11 @@ SOFTWARE.
 #include <vector>
 #include <cassert>
 
+#include "logging.h"
+#include "assimp/Importer.hpp"
+#include "assimp/scene.h"
+#include "assimp/postprocess.h"
+
 bool operator <(const Vector3 &lhs, const Vector3 &rhs)
 {
 	return std::tie(lhs.x, lhs.y, lhs.z) < std::tie(rhs.x, rhs.y, rhs.z);
@@ -598,6 +603,65 @@ Mesh* Mesh::loadPly(const char *path)
 	{
 		return nullptr;
 	}
+}
+
+Mesh* Mesh::loadFBX(const char *path)
+{
+	using namespace Assimp;
+	Assimp::Importer importer;
+	unsigned int flags = aiProcess_Triangulate |
+		aiProcess_JoinIdenticalVertices |
+		aiProcess_PreTransformVertices |
+		aiProcess_RemoveRedundantMaterials |
+		aiProcess_OptimizeMeshes |
+		aiProcess_FlipWindingOrder;
+	const aiScene* import_fbx_scene = importer.ReadFile(path, flags);
+
+	if (import_fbx_scene == NULL)
+	{
+		std::string error_code = importer.GetErrorString();
+		logDebug("Load FBX", "load fbx file failed! " + error_code);
+		return NULL;
+	}
+
+	unsigned int mesh_num = import_fbx_scene->mNumMeshes;
+	//unsigned int mat_num = import_fbx_scene->mNumMaterials;
+
+
+	Mesh *pMesh = new Mesh();
+	
+	for (unsigned int mesh_i = 0; mesh_i < mesh_num; ++mesh_i)
+	{
+		aiMesh* mesh_ptr = import_fbx_scene->mMeshes[mesh_i];
+
+		//Mesh* p_cy_mesh = fbx_add_mesh(scene, transform_identity());
+		//p_cy_mesh->reserve_mesh(vertex_num, triangle_num);
+		int uv_channel_idx = mesh_ptr->GetNumUVChannels() - 1;
+		int vertex_num = mesh_ptr->mNumVertices;		
+
+		for (int i = 0; i < vertex_num; ++i)
+		{
+			const aiVector3D &v = mesh_ptr->mVertices[i];
+			const aiVector3D &uv = mesh_ptr->mTextureCoords[uv_channel_idx][i];
+			const aiVector3D &normal = mesh_ptr->mNormals[i];			
+
+			pMesh->positions.emplace_back(Vector3(v.x, v.y, v.z));
+			pMesh->texcoords.emplace_back(Vector2(uv.x, uv.y));
+			pMesh->normals.emplace_back(Vector3(normal.x, normal.y, normal.z));					
+
+			pMesh->vertices.emplace_back(Vertex{ (uint32_t)i, (uint32_t)i, (uint32_t)i });
+		}
+
+		int triangle_num = mesh_ptr->mNumFaces;
+		//int index_num = triangle_num * 3;
+		for (int i = 0; i < triangle_num; ++i)
+		{
+			const aiFace &face = mesh_ptr->mFaces[i];
+			pMesh->triangles.emplace_back(Triangle{ face.mIndices[0], face.mIndices[1], face.mIndices[2] });
+		}		
+	}
+
+	return pMesh;
 }
 
 namespace

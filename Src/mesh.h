@@ -61,6 +61,7 @@ public:
 public:
 	static Mesh* loadWavefrontObj(const char *path);
 	static Mesh* loadPly(const char *path);
+	static Mesh* loadFBX(const char *path);
 	static Mesh* loadFile(const char *path);
 	static Mesh* createCopy(const Mesh *mesh);
 
