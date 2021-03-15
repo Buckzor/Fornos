@@ -5,7 +5,7 @@
 # Commands may need to know the format version.
 set(CMAKE_IMPORT_FILE_VERSION 1)
 
-set(ASSIMP_BUILD_SHARED_LIBS OFF)
+set(ASSIMP_BUILD_SHARED_LIBS ON)
 
 if(MSVC)
   if(MSVC_TOOLSET_VERSION)

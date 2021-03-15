@@ -51,7 +51,7 @@ if(_IMPORT_PREFIX STREQUAL "/")
 endif()
 
 # Create imported target assimp::assimp
-if(OFF)
+if(ON)
   add_library(assimp::assimp SHARED IMPORTED)
 else()
   add_library(assimp::assimp STATIC IMPORTED)
