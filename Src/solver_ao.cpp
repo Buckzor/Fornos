@@ -78,6 +78,14 @@ void AmbientOcclusionSolver::init(std::shared_ptr<const CompressedMapUV> map, st
 	_workOffset = 0;
 }
 
+void AmbientOcclusionSolver::setDiffTex(unsigned char *texData, int w, int h, int comp)
+{
+	_diffTexData = (char*)texData;
+	width = w;
+	height = h;
+	this->comp = comp;
+}
+
 bool AmbientOcclusionSolver::runStep()
 {
 	const size_t totalWork = _workCount * _params.sampleCount;
@@ -94,7 +102,7 @@ bool AmbientOcclusionSolver::runStep()
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, _meshMapping->meshNormals()->bo());
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, _meshMapping->coords()->bo());
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, _meshMapping->coords_tidx()->bo());
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, _rayDataCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, _rayDataCB->bo());	
 	glDispatchCompute((GLuint)(work / _params.sampleCount / k_groupSize), 1, 1);
 
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
@@ -107,6 +115,22 @@ bool AmbientOcclusionSolver::runStep()
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, _samplesCB->bo());
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, _rayDataCB->bo());
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, _resultsMiddleCB->bo());
+	//bind diffuse texture
+	unsigned int texture;	
+	glGenTextures(1, &texture);
+	glBindTexture(GL_TEXTURE_2D, texture);
+	glActiveTexture(GL_TEXTURE0);
+	// set the texture wrapping/filtering options (on the currently bound texture object)
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_REPEAT);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	// load and generate the texture
+	if (_diffTexData)
+	{
+		assert(comp == 4);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, _diffTexData);
+	}
 	glDispatchCompute((GLuint)(work / k_groupSize), 1, 1);
 
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);

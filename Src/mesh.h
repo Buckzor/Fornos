@@ -52,6 +52,7 @@ public:
 
 	std::vector<Vector3> positions;
 	std::vector<Vector2> texcoords;
+	std::vector<Vector2> SrctexcoordsUV0;
 	std::vector<Vector3> normals;
 	std::vector<Vector3> tangents;
 	std::vector<Vector3> bitangents;

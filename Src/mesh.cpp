@@ -656,6 +656,10 @@ Mesh* Mesh::loadFBX(const char *path)
 			pMesh->normals.emplace_back(Vector3(normal.x, normal.y, normal.z));					
 
 			pMesh->vertices.emplace_back(Vertex{ (uint32_t)i, (uint32_t)i, (uint32_t)i });
+
+			//source uv0
+			const aiVector3D &uv0 = mesh_ptr->mTextureCoords[0][i];
+			pMesh->SrctexcoordsUV0.emplace_back(Vector2(uv0.x, uv0.y));
 		}
 
 		int triangle_num = mesh_ptr->mNumFaces;

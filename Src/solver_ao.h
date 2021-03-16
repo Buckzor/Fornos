@@ -44,9 +44,12 @@ public:
 	};
 
 public:
-	AmbientOcclusionSolver(const Params &params) : _params(params) {}
+	AmbientOcclusionSolver(const Params &params) : _params(params), _diffTexData(NULL) {}
+	~AmbientOcclusionSolver() { if (_diffTexData) { delete _diffTexData; _diffTexData = NULL; } }
 
 	void init(std::shared_ptr<const CompressedMapUV> map, std::shared_ptr<MeshMapping> meshMapping);
+	void setDiffTex(unsigned char *texData, int w, int h, int comp);
+
 	bool runStep();
 	float* getResults();
 
@@ -91,6 +94,11 @@ private:
 
 	std::shared_ptr<const CompressedMapUV> _uvMap;
 	std::shared_ptr<MeshMapping> _meshMapping;
+
+	char* _diffTexData;
+	int width;
+	int height;
+	int comp;
 
 	Timing _timing;
 };

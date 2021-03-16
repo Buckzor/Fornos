@@ -40,6 +40,8 @@ layout(std430, binding = 6) readonly buffer samplesBuffer { vec3 samples[]; };
 layout(std430, binding = 7) readonly buffer inputsBuffer { Input inputs[]; };
 layout(std430, binding = 8) writeonly buffer resultAccBuffer { float results[]; };
 
+uniform sampler2D diffuse_tex;
+
 float RayAABB(vec3 o, vec3 d, vec3 mins, vec3 maxs)
 {
 	vec3 t1 = (mins - o) / d;

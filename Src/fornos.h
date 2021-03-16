@@ -42,9 +42,9 @@ struct FornosParameters_Shared
 	NormalImport loPolyMeshNormal = NormalImport::Import;
 	NormalImport hiPolyMeshNormal = NormalImport::Import;
 	int bvhTrisPerNode = 8;
-	int texWidth = 2048;
-	int texHeight = 2048;
-	int texDilation = 16;
+	int texWidth = 256;
+	int texHeight = 256;
+	int texDilation = 2;
 	bool ignoreBackfaces = true;
 	MeshMappingMethod mapping = MeshMappingMethod::Smooth;
 	float mappingEdge = 0.05f;
@@ -79,7 +79,7 @@ struct FornosParameters_SolverNormals
 
 struct FornosParameters_SolverAO
 {
-	bool enabled = false;
+	bool enabled = true;
 	int sampleCount = 256;
 	float minDistance = 0.01f;
 	float maxDistance = 10.0f;

@@ -271,6 +271,7 @@
     <ClInclude Include="..\Src\solver_normals.h" />
     <ClInclude Include="..\Src\solver_position.h" />
     <ClInclude Include="..\Src\solver_thickness.h" />
+    <ClInclude Include="..\Src\stb_image.h" />
     <ClInclude Include="..\Src\stb_image_write.h" />
     <ClInclude Include="..\Src\timing.h" />
   </ItemGroup>

@@ -41,6 +41,8 @@ SOFTWARE.
 #include "solver_normals.h"
 #include "solver_thickness.h"
 
+#include "stb_image.h"
+
 static int windowWidth = 640;
 static int windowHeight = 480;
 
@@ -192,8 +194,14 @@ bool FornosRunner::start(const FornosParameters &params, std::string &errors)
 		solverParams.sampleCount = (uint32_t)params.ao.sampleCount;
 		solverParams.minDistance = params.ao.minDistance;
 		solverParams.maxDistance = params.ao.maxDistance;
+
+		//load texture
+		int width, height, numComponents;
+		unsigned char* imgData = stbi_load(params.ao.inputDiffuseImgPath.c_str(), &width, &height, &numComponents, 4);
+
 		std::unique_ptr<AmbientOcclusionSolver> solver(new AmbientOcclusionSolver(solverParams));
 		solver->init(compressedMap, meshMapping);
+		solver->setDiffTex(imgData, width, height, numComponents);
 		_tasks.emplace_back(
 			new AmbientOcclusionTask(std::move(solver), params.ao.outputPath.c_str(), params.shared.texDilation)
 		);
