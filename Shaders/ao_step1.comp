@@ -39,6 +39,7 @@ layout(std430, binding = 5) readonly buffer bvhBuffer { BVH bvhs[]; };
 layout(std430, binding = 6) readonly buffer samplesBuffer { vec3 samples[]; };
 layout(std430, binding = 7) readonly buffer inputsBuffer { Input inputs[]; };
 layout(std430, binding = 8) writeonly buffer resultAccBuffer { float results[]; };
+layout(std430, binding = 9) readonly buffer meshUVBuffer { vec2 texcoords[]; };
 
 uniform sampler2D diffuse_tex;
 
@@ -51,6 +52,15 @@ float RayAABB(vec3 o, vec3 d, vec3 mins, vec3 maxs)
 	float a = max(tmin.x, max(tmin.y, tmin.z));
 	float b = min(tmax.x, min(tmax.y, tmax.z));
 	return (b >= 0 && a <= b) ? a : FLT_MAX;
+}
+
+vec3 interplate_float3(vec3 v0, vec3 v1, vec3 v2, vec3 coeff)
+{
+	return vec3(
+		dot(vec3(v0.x, v1.x, v2.x), coeff),
+		dot(vec3(v0.y, v1.y, v2.y), coeff),
+		dot(vec3(v0.z, v1.z, v2.z), coeff)
+	);
 }
 
 vec3 barycentric(vec3 p, vec3 a, vec3 b, vec3 c)
@@ -70,7 +80,7 @@ vec3 barycentric(vec3 p, vec3 a, vec3 b, vec3 c)
 }
 
 // Returns distance (x) + barycentric coordinates (yzw)
-float raycast(vec3 o, vec3 d, vec3 a, vec3 b, vec3 c)
+float raycast(vec3 o, vec3 d, vec3 a, vec3 b, vec3 c, vec3 u0, vec3 u1, vec3 u2)
 {
 	vec3 n = normalize(cross(b - a, c - a));
 	float nd = dot(d, n);
@@ -82,9 +92,15 @@ float raycast(vec3 o, vec3 d, vec3 a, vec3 b, vec3 c)
 		{
 			vec3 p = o + d * t;
 			vec3 b = barycentric(p, a, b, c);
+
+			//get uv
+			vec3 diffuse_uv = interplate_float3(u0, u1, u2, b);
+			float alpha_value = texture2D(diffuse_tex, diffuse_uv.xy).r;
+
 			if (b.x >= 0 && //b.x <= 1 &&
 				b.y >= 0 && b.y <= 1 &&
-				b.z >= 0 && b.z <= 1)
+				b.z >= 0 && b.z <= 1 &&
+				alpha_value > 0.1)
 			{
 				return t;
 			}
@@ -101,7 +117,10 @@ float raycastRange(vec3 o, vec3 d, uint start, uint end, float mindist)
 		vec3 v0 = positions[tidx + 0];
 		vec3 v1 = positions[tidx + 1];
 		vec3 v2 = positions[tidx + 2];
-		float t = raycast(o, d, v0, v1, v2);
+		vec3 u0 = vec3(texcoords[tidx + 0], 0.0f);
+		vec3 u1 = vec3(texcoords[tidx + 1], 0.0f);
+		vec3 u2 = vec3(texcoords[tidx + 2], 0.0f);
+		float t = raycast(o, d, v0, v1, v2, u0, u1, u2);
 		if (t >= mindist && t < mint)
 		{
 			mint = t;

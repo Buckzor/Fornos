@@ -115,6 +115,7 @@ bool AmbientOcclusionSolver::runStep()
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, _samplesCB->bo());
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, _rayDataCB->bo());
 	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, _resultsMiddleCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, _meshMapping->meshTexcoords()->bo());
 	//bind diffuse texture
 	unsigned int texture;	
 	glGenTextures(1, &texture);

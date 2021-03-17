@@ -53,6 +53,7 @@ public:
 	inline const ComputeBuffer<PixT_GPUData>* pixelst() const { return _pixelst.get(); }
 	inline const ComputeBuffer<Vector4>* meshPositions() const { return _meshPositions.get(); }
 	inline const ComputeBuffer<Vector4>* meshNormals() const { return _meshNormals.get(); }
+	inline const ComputeBuffer<Vector2>* meshTexcoords() const { return _meshTexcoords.get(); }
 	inline const ComputeBuffer<BVHGPUData>* meshBVH() const { return _bvh.get(); }
 
 
@@ -67,6 +68,7 @@ private:
 	std::unique_ptr<ComputeBuffer<PixT_GPUData> > _pixelst;
 	std::unique_ptr<ComputeBuffer<Vector4> > _meshPositions;
 	std::unique_ptr<ComputeBuffer<Vector4> > _meshNormals;
+	std::unique_ptr<ComputeBuffer<Vector2> > _meshTexcoords;
 	std::unique_ptr<ComputeBuffer<BVHGPUData> > _bvh;
 	GLuint _program;
 	GLuint _programCullBackfaces;

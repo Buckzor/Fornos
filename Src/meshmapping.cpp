@@ -64,7 +64,8 @@ namespace
 		const BVH& bvh,
 		std::vector<BVHGPUData> &bvhs,
 		std::vector<Vector4> &positions,
-		std::vector<Vector4> &normals)
+		std::vector<Vector4> &normals, 
+		std::vector<Vector2> &texcoords)
 	{
 		if (bvh.children.empty() &&
 			bvh.triangles.empty())
@@ -81,12 +82,12 @@ namespace
 			// for nothing
 			if (bvh.children[0].subtreeTriangleCount > 0 && bvh.children[1].subtreeTriangleCount == 0)
 			{
-				fillMeshData(mesh, bvh.children[0], bvhs, positions, normals);
+				fillMeshData(mesh, bvh.children[0], bvhs, positions, normals, texcoords);
 				return;
 			}
 			if (bvh.children[1].subtreeTriangleCount > 0 && bvh.children[0].subtreeTriangleCount == 0)
 			{
-				fillMeshData(mesh, bvh.children[1], bvhs, positions, normals);
+				fillMeshData(mesh, bvh.children[1], bvhs, positions, normals, texcoords);
 				return;
 			}
 		}
@@ -112,14 +113,17 @@ namespace
 			normals.push_back(mesh->normals[v0.normalIndex]);
 			normals.push_back(mesh->normals[v1.normalIndex]);
 			normals.push_back(mesh->normals[v2.normalIndex]);
+			texcoords.push_back(mesh->SrctexcoordsUV0[v0.texcoordIndex]);
+			texcoords.push_back(mesh->SrctexcoordsUV0[v1.texcoordIndex]);
+			texcoords.push_back(mesh->SrctexcoordsUV0[v2.texcoordIndex]);
 		}
 		d.end = (uint32_t)positions.size();
 
 		const size_t index = bvhs.size() - 1; // Because d gets invalidated by fillMeshData!
 		if (bvh.children.size() > 0)
 		{
-			fillMeshData(mesh, bvh.children[0], bvhs, positions, normals);
-			fillMeshData(mesh, bvh.children[1], bvhs, positions, normals);
+			fillMeshData(mesh, bvh.children[0], bvhs, positions, normals, texcoords);
+			fillMeshData(mesh, bvh.children[1], bvhs, positions, normals, texcoords);
 		}
 		bvhs[index].jump = (uint32_t)bvhs.size();
 	}
@@ -153,13 +157,16 @@ void MeshMapping::init
 		std::vector<BVHGPUData> bvhs;
 		std::vector<Vector4> positions;
 		std::vector<Vector4> normals;
-		fillMeshData(mesh.get(), *rootBVH, bvhs, positions, normals);
+		std::vector<Vector2> texcoords;
+		fillMeshData(mesh.get(), *rootBVH, bvhs, positions, normals, texcoords);
 		_meshPositions = std::unique_ptr<ComputeBuffer<Vector4> >(
 			new ComputeBuffer<Vector4>(&positions[0], positions.size(), GL_STATIC_DRAW));
 		_meshNormals = std::unique_ptr<ComputeBuffer<Vector4> >(
 			new ComputeBuffer<Vector4>(&normals[0], normals.size(), GL_STATIC_DRAW));
 		_bvh = std::unique_ptr<ComputeBuffer<BVHGPUData> >(
 			new ComputeBuffer<BVHGPUData>(&bvhs[0], bvhs.size(), GL_STATIC_DRAW));
+		_meshTexcoords = std::unique_ptr<ComputeBuffer<Vector2> >(
+			new ComputeBuffer<Vector2>(&texcoords[0], texcoords.size(), GL_STATIC_DRAW));
 	}
 
 	_workCount = ((map->positions.size() + k_groupSize - 1) / k_groupSize) * k_groupSize;
