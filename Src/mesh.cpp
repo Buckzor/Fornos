@@ -648,7 +648,7 @@ Mesh* Mesh::loadFBX(const char *path)
 		for (int i = 0; i < vertex_num; ++i)
 		{
 			const aiVector3D &v = mesh_ptr->mVertices[i];
-			const aiVector3D &uv = mesh_ptr->mTextureCoords[uv_channel_idx][i];
+			const aiVector3D &uv = mesh_ptr->mTextureCoords[1][i]; //now uv1 is bake ao channel
 			const aiVector3D &normal = mesh_ptr->mNormals[i];			
 
 			pMesh->positions.emplace_back(Vector3(v.x, v.y, v.z));

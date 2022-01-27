@@ -42,8 +42,8 @@ struct FornosParameters_Shared
 	NormalImport loPolyMeshNormal = NormalImport::Import;
 	NormalImport hiPolyMeshNormal = NormalImport::Import;
 	int bvhTrisPerNode = 8;
-	int texWidth = 256;
-	int texHeight = 256;
+	int texWidth = 1024;
+	int texHeight = 1024;
 	int texDilation = 2;
 	bool ignoreBackfaces = true;
 	MeshMappingMethod mapping = MeshMappingMethod::Smooth;
