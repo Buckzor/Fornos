@@ -605,7 +605,7 @@ Mesh* Mesh::loadPly(const char *path)
 	}
 }
 
-Mesh* Mesh::loadFBX(const char *path)
+Mesh* Mesh::loadFBX(const char* path)
 {
 	using namespace Assimp;
 	Assimp::Importer importer;
@@ -620,55 +620,97 @@ Mesh* Mesh::loadFBX(const char *path)
 	if (import_fbx_scene == NULL)
 	{
 		std::string error_code = importer.GetErrorString();
-		logDebug("Load FBX", "load fbx file failed! " + error_code);
+		logDebug("Load FBX", "Load FBX file failed! " + error_code);
 		return NULL;
 	}
 
 	unsigned int mesh_num = import_fbx_scene->mNumMeshes;
-	//unsigned int mat_num = import_fbx_scene->mNumMaterials;
 
+	Mesh* pMesh = new Mesh();
 
-	Mesh *pMesh = new Mesh();
-	
 	for (unsigned int mesh_i = 0; mesh_i < mesh_num; ++mesh_i)
 	{
 		aiMesh* mesh_ptr = import_fbx_scene->mMeshes[mesh_i];
 
-		//Mesh* p_cy_mesh = fbx_add_mesh(scene, transform_identity());
-		//p_cy_mesh->reserve_mesh(vertex_num, triangle_num);
-		int uv_channel_idx = mesh_ptr->GetNumUVChannels() - 1;
+		int uv_channel_count = mesh_ptr->GetNumUVChannels();
 
-		if (uv_channel_idx != 1)
+		if (uv_channel_count == 0)
 		{
-			logError("Load FBX", "uv1 is not baking channel!");
+			logError("Load FBX", "No UV channels found in the mesh.");
+			// Handle the error as appropriate.
+			// You may choose to skip this mesh or proceed with default UVs.
 		}
 
-		int vertex_num = mesh_ptr->mNumVertices;		
+		int vertex_num = mesh_ptr->mNumVertices;
 
 		for (int i = 0; i < vertex_num; ++i)
 		{
-			const aiVector3D &v = mesh_ptr->mVertices[i];
-			const aiVector3D &uv = mesh_ptr->mTextureCoords[1][i]; //now uv1 is bake ao channel
-			const aiVector3D &normal = mesh_ptr->mNormals[i];			
-
+			const aiVector3D& v = mesh_ptr->mVertices[i];
 			pMesh->positions.emplace_back(Vector3(v.x, v.y, v.z));
-			pMesh->texcoords.emplace_back(Vector2(uv.x, uv.y));
-			pMesh->normals.emplace_back(Vector3(normal.x, normal.y, normal.z));					
 
+			// Handle normals
+			if (mesh_ptr->HasNormals())
+			{
+				const aiVector3D& normal = mesh_ptr->mNormals[i];
+				pMesh->normals.emplace_back(Vector3(normal.x, normal.y, normal.z));
+			}
+			else
+			{
+				// Assign a default normal if missing
+				pMesh->normals.emplace_back(Vector3(0.0f, 0.0f, 1.0f));
+				logError("Load FBX", "Vertex normal missing. Using default normal.");
+			}
+
+			// Handle UV coordinates
+			// Try to get UV channel 1, fall back to UV channel 0, else use default UVs
+			Vector2 uv(0.0f, 0.0f); // Default UV
+
+			if (uv_channel_count >= 2 && mesh_ptr->mTextureCoords[1])
+			{
+				const aiVector3D& uv_vec = mesh_ptr->mTextureCoords[1][i];
+				uv = Vector2(uv_vec.x, uv_vec.y);
+			}
+			else if (uv_channel_count >= 1 && mesh_ptr->mTextureCoords[0])
+			{
+				const aiVector3D& uv_vec = mesh_ptr->mTextureCoords[0][i];
+				uv = Vector2(uv_vec.x, uv_vec.y);
+				logWarning("Load FBX", "UV channel 1 missing. Using UV channel 0.");
+			}
+			else
+			{
+				// No UV channels available
+				logError("Load FBX", "No UV coordinates available for vertex. Using default UVs.");
+			}
+			pMesh->texcoords.emplace_back(uv);
+
+			// Source UV0 (assuming UV channel 0)
+			if (uv_channel_count >= 1 && mesh_ptr->mTextureCoords[0])
+			{
+				const aiVector3D& uv0_vec = mesh_ptr->mTextureCoords[0][i];
+				pMesh->SrctexcoordsUV0.emplace_back(Vector2(uv0_vec.x, uv0_vec.y));
+			}
+			else
+			{
+				pMesh->SrctexcoordsUV0.emplace_back(Vector2(0.0f, 0.0f));
+			}
+
+			// Add vertex
 			pMesh->vertices.emplace_back(Vertex{ (uint32_t)i, (uint32_t)i, (uint32_t)i });
-
-			//source uv0
-			const aiVector3D &uv0 = mesh_ptr->mTextureCoords[0][i];
-			pMesh->SrctexcoordsUV0.emplace_back(Vector2(uv0.x, uv0.y));
 		}
 
 		int triangle_num = mesh_ptr->mNumFaces;
-		//int index_num = triangle_num * 3;
 		for (int i = 0; i < triangle_num; ++i)
 		{
-			const aiFace &face = mesh_ptr->mFaces[i];
-			pMesh->triangles.emplace_back(Triangle{ face.mIndices[0], face.mIndices[1], face.mIndices[2] });
-		}		
+			const aiFace& face = mesh_ptr->mFaces[i];
+			if (face.mNumIndices == 3)
+			{
+				pMesh->triangles.emplace_back(Triangle{ face.mIndices[0], face.mIndices[1], face.mIndices[2] });
+			}
+			else
+			{
+				logError("Load FBX", "Non-triangular face encountered. Skipping face.");
+			}
+		}
 	}
 
 	return pMesh;

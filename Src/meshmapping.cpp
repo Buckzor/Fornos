@@ -25,6 +25,7 @@ SOFTWARE.
 #include "computeshaders.h"
 #include "logging.h"
 #include "mesh.h"
+#include <iostream>
 #include <cassert>
 
 static const size_t k_groupSize = 64;
@@ -66,6 +67,8 @@ namespace
 		std::vector<Vector4> &positions,
 		std::vector<Vector4> &normals, 
 		std::vector<Vector2> &texcoords)
+
+
 	{
 		if (bvh.children.empty() &&
 			bvh.triangles.empty())
@@ -93,6 +96,7 @@ namespace
 		}
 #endif
 
+
 		bvhs.emplace_back(BVHGPUData());
 		BVHGPUData &d = bvhs.back();
 		d.aabbMin = bvh.aabb.center - bvh.aabb.size;
@@ -113,9 +117,31 @@ namespace
 			normals.push_back(mesh->normals[v0.normalIndex]);
 			normals.push_back(mesh->normals[v1.normalIndex]);
 			normals.push_back(mesh->normals[v2.normalIndex]);
-			texcoords.push_back(mesh->SrctexcoordsUV0[v0.texcoordIndex]);
-			texcoords.push_back(mesh->SrctexcoordsUV0[v1.texcoordIndex]);
-			texcoords.push_back(mesh->SrctexcoordsUV0[v2.texcoordIndex]);
+
+			if (mesh->SrctexcoordsUV0.empty()) {
+				std::cerr << "Error: UV coordinates not loaded properly. SrctexcoordsUV0 is empty." << std::endl;
+				// Handle this error appropriately (e.g., return, exit, or set default values)
+				return;
+			}
+
+			if (v0.texcoordIndex < mesh->SrctexcoordsUV0.size()) {
+				texcoords.push_back(mesh->SrctexcoordsUV0[v0.texcoordIndex]);
+			}
+			else {
+				std::cerr << "Warning: texcoordIndex out of bounds: " << v0.texcoordIndex << std::endl;
+			}
+			if (v1.texcoordIndex < mesh->SrctexcoordsUV0.size()) {
+				texcoords.push_back(mesh->SrctexcoordsUV0[v1.texcoordIndex]);
+			}
+			else {
+				std::cerr << "Warning: texcoordIndex out of bounds: " << v1.texcoordIndex << std::endl;
+			}
+			if (v2.texcoordIndex < mesh->SrctexcoordsUV0.size()) {
+				texcoords.push_back(mesh->SrctexcoordsUV0[v2.texcoordIndex]);
+			}
+			else {
+				std::cerr << "Warning: texcoordIndex out of bounds: " << v2.texcoordIndex << std::endl;
+			}
 		}
 		d.end = (uint32_t)positions.size();
 
