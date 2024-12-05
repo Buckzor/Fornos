@@ -425,6 +425,14 @@ void FornosParameters_SolverHeight_View::render(int windowWidth, int windowHeigh
 		parameter("Max distance", &data->maxDistance, "##heightMaxDistance",
 			"Max distance to consider occluders.");
 
+		parameter("Sample count", &data->sampleCount, "##heightSampleCount",
+			"Multiple Samples for emulating Sub-Surface Scattering");
+
+		parameter("Cone Spread Angle", &data->coneAngle, "##heightConeAngle",
+			"Sampling Cone Angle");
+
+
+
 		parameters_end();
 
 		if (!data->enabled)

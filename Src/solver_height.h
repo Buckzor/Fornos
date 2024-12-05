@@ -26,6 +26,7 @@ SOFTWARE.
 #include "compute.h"
 #include "fornos.h"
 #include "timing.h"
+#include <vector>
 #include <memory>
 
 struct CompressedMapUV;
@@ -38,6 +39,8 @@ public:
 	{
 		bool normalizeOutput;
 		float maxDistance;
+		uint32_t sampleCount = 1;   // Number of samples per pixel
+		float coneAngle = 0.0f;    // Cone angle in degrees
 	};
 
 public:
@@ -60,9 +63,12 @@ private:
 
 	GLuint _heightProgram;
 	std::unique_ptr<ComputeBuffer<float> > _resultsCB;
+	std::unique_ptr<ComputeBuffer<Vector4> > _samplesCB; // Buffer for sample directions
 
 	std::shared_ptr<const CompressedMapUV> _uvMap;
 	std::shared_ptr<MeshMapping> _meshMapping;
+
+	std::unique_ptr<ComputeBuffer<uint32_t>> _debugCB;
 
 	Timing _timing;
 };

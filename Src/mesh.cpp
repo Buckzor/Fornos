@@ -674,7 +674,7 @@ Mesh* Mesh::loadFBX(const char* path)
 			{
 				const aiVector3D& uv_vec = mesh_ptr->mTextureCoords[0][i];
 				uv = Vector2(uv_vec.x, uv_vec.y);
-				logWarning("Load FBX", "UV channel 1 missing. Using UV channel 0.");
+				//logWarning("Load FBX", "UV channel 1 missing. Using UV channel 0.");
 			}
 			else
 			{

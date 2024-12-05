@@ -56,6 +56,8 @@ struct FornosParameters_SolverHeight
 	std::string outputPath;
 	bool normalizeOutput = true;
 	float maxDistance = 0.0f;
+	int sampleCount = 1;
+	float coneAngle = 0.0f;
 
 	bool ready() { return enabled && !outputPath.empty(); }
 };

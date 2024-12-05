@@ -19,7 +19,7 @@ layout(std430, binding = 3) readonly buffer meshNBuffer { vec3 normals[]; };
 layout(std430, binding = 4) readonly buffer coordsBuffer { vec4 coords[]; };
 layout(std430, binding = 5) readonly buffer coordsTidxBuffer { uint coords_tidx[]; };
 layout(std430, binding = 6) writeonly buffer outputBuffer { Output outputs[]; };
- 
+
 vec3 getPosition(uint tidx, vec3 bcoord)
 {
 vec3 p0 = positions[tidx + 0];
@@ -449,20 +449,219 @@ R"(
 #version 430 core
 #extension GL_ARB_compute_shader : enable
 #extension GL_ARB_shader_storage_buffer_object : enable
-layout (local_size_x = 64) in;
+
 #define FLT_MAX 3.402823466e+38
+
+layout(local_size_x = 64) in;
+
 layout(location = 1) uniform uint workOffset;
+layout(location = 2) uniform uint sampleCount;
+layout(location = 3) uniform float maxDistance;
+layout(location = 4) uniform float coneAngleDegrees;
+layout(location = 5) uniform uint bvhCount;
+
+struct BVH
+{
+    float aabbMinX; float aabbMinY; float aabbMinZ;
+    float aabbMaxX; float aabbMaxY; float aabbMaxZ;
+    uint start;
+    uint end;
+    uint jump;  
+};
+
 layout(std430, binding = 2) readonly buffer coordsBuffer { vec4 coords[]; };
 layout(std430, binding = 3) writeonly buffer resultBuffer { float results[]; };
+layout(std430, binding = 4) readonly buffer meshPBuffer { vec3 positions[]; };
+layout(std430, binding = 5) readonly buffer bvhBuffer { BVH bvhs[]; };
+layout(std430, binding = 6) readonly buffer meshNBuffer { vec3 normals[]; };
+layout(std430, binding = 8) writeonly buffer debugBuffer { uint debugHits[]; };
+
+
+// Include any other necessary structs or definitions for raycasting
+
+// Function to create a coordinate system
+void createCoordinateSystem(vec3 N, out vec3 T, out vec3 B)
+{
+    if (abs(N.x) > abs(N.y))
+        T = normalize(vec3(N.z, 0.0, -N.x));
+    else
+        T = normalize(vec3(0.0, -N.z, N.y));
+    B = cross(N, T);
+}
+
+// Function to perform ray-AABB intersection
+float RayAABB(vec3 o, vec3 d, vec3 mins, vec3 maxs)
+{
+    vec3 invD = 1.0 / d;
+    vec3 t0s = (mins - o) * invD;
+    vec3 t1s = (maxs - o) * invD;
+    vec3 tsmaller = min(t0s, t1s);
+    vec3 tbigger = max(t0s, t1s);
+    float tmin = max(max(tsmaller.x, tsmaller.y), tsmaller.z);
+    float tmax = min(min(tbigger.x, tbigger.y), tbigger.z);
+    return (tmax >= max(tmin, 0.0)) ? tmin : FLT_MAX;
+}
+
+// Function to perform ray-triangle intersection
+float rayTriangleIntersect(vec3 o, vec3 d, vec3 v0, vec3 v1, vec3 v2)
+{
+    vec3 e1 = v1 - v0;
+    vec3 e2 = v2 - v0;
+    vec3 pvec = cross(d, e2);
+    float det = dot(e1, pvec);
+    if (abs(det) < 1e-8) return FLT_MAX;
+    float invDet = 1.0 / det;
+    vec3 tvec = o - v0;
+    float u = dot(tvec, pvec) * invDet;
+    if (u < 0.0 || u > 1.0) return FLT_MAX;
+    vec3 qvec = cross(tvec, e1);
+    float v = dot(d, qvec) * invDet;
+    if (v < 0.0 || u + v > 1.0) return FLT_MAX;
+    float t = dot(e2, qvec) * invDet;
+    return (t >= 0.0) ? t : FLT_MAX;
+}
+
+// Function to test ray against triangles in a range
+float raycastRange(vec3 o, vec3 d, uint start, uint end, float mindist)
+{
+    float mint = FLT_MAX;
+    for (uint idx = start; idx < end; idx += 3)
+    {
+        vec3 v0 = positions[idx + 0];
+        vec3 v1 = positions[idx + 1];
+        vec3 v2 = positions[idx + 2];
+        float t = rayTriangleIntersect(o, d, v0, v1, v2);
+        if (t > mindist && t < mint)
+        {
+            mint = t;
+        }
+    }
+    return mint;
+}
+
+// Function to traverse the BVH and perform ray intersections
+float raycastBVH(vec3 o, vec3 d, float mindist, float maxdist)
+{
+    float mint = FLT_MAX;
+    uint stack[64];
+    int stackPtr = 0;
+    stack[stackPtr++] = 0; // Start with root node
+
+    while (stackPtr > 0)
+    {
+        uint i = stack[--stackPtr];
+        BVH bvh = bvhs[i];
+        vec3 aabbMin = vec3(bvh.aabbMinX, bvh.aabbMinY, bvh.aabbMinZ);
+        vec3 aabbMax = vec3(bvh.aabbMaxX, bvh.aabbMaxY, bvh.aabbMaxZ);
+        float distAABB = RayAABB(o, d, aabbMin, aabbMax);
+        if (distAABB < mint && distAABB < maxdist)
+        {
+            if (bvh.end - bvh.start <= 0) // This is a leaf node
+            {
+                float t = raycastRange(o, d, bvh.start, bvh.end, mindist);
+                if (t < mint)
+                {
+                    mint = t;
+                }
+            }
+            else // Internal node
+            {
+                // Push child nodes onto the stack
+                stack[stackPtr++] = bvh.start;
+                stack[stackPtr++] = bvh.end;
+            }
+        }
+    }
+    return mint;
+}
+
+// Function to sample directions within a cone
+vec3 importanceSampleCone(vec3 normal, float cosThetaMax, inout uint seed)
+{
+    // Simple random number generator
+    seed = seed * 16807u;
+    float u1 = float(seed % 10000u) / 10000.0;
+    seed = seed * 16807u;
+    float u2 = float(seed % 10000u) / 10000.0;
+
+    float cosTheta = mix(cosThetaMax, 1.0, u1);
+    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+    float phi = 2.0 * 3.14159265358979323846 * u2;
+
+    vec3 sampleDir = vec3(
+        sinTheta * cos(phi),
+        sinTheta * sin(phi),
+        cosTheta
+    );
+
+    vec3 tangent, bitangent;
+    createCoordinateSystem(normal, tangent, bitangent);
+
+    return normalize(
+        sampleDir.x * tangent +
+        sampleDir.y * bitangent +
+        sampleDir.z * normal
+    );
+}
+
+// Raycasting functions (raycastBVH, raycastRange, etc.)
+// You can reuse these from your AO shader, ensuring they are correctly adapted
+
 void main()
 {
-uint gid = gl_GlobalInvocationID.x + workOffset;
-vec4 coord = coords[gid];
-float height = coord.x;
-results[gid] = height != FLT_MAX ? height : 0;
+    uint gid = gl_GlobalInvocationID.x + workOffset;
+
+    // Ensure gid is within bounds
+    if (gid >= coords.length())
+        return;
+
+    vec4 coord = coords[gid];
+    vec3 position = coord.xyz;  // Adjust according to how position is stored
+    vec3 normal = normals[gid]; // Fetch the normal for the current pixel
+
+    float totalDistance = 0.0;
+    uint hitCount = 0;
+
+    // Convert cone angle to radians
+    float coneAngleRadians = radians(coneAngleDegrees);
+    float cosThetaMax = cos(coneAngleRadians);
+
+    uint seed = gid; // Initialize seed
+
+    for (uint i = 0; i < sampleCount; ++i)
+    {
+        vec3 sampleDir = importanceSampleCone(normal, cosThetaMax, seed);
+
+        // Perform raycast
+        //float t = raycastBVH(position, sampleDir, 0.001, maxDistance);
+
+        float t = FLT_MAX;
+        for (uint idx = 0; idx < positions.length(); idx += 3)
+        {
+            vec3 v0 = positions[idx + 0];
+            vec3 v1 = positions[idx + 1];
+            vec3 v2 = positions[idx + 2];
+            float hit = rayTriangleIntersect(position, sampleDir, v0, v1, v2);
+            if (hit < t)
+            {
+                t = hit;
+            }
+        }
+
+        if (t < maxDistance)
+        {
+            totalDistance += t;
+            hitCount++;
+        }
+    }
+
+    // Compute average distance
+    float averageDistance = (hitCount > 0) ? (totalDistance / float(hitCount)) : maxDistance;
+
+    results[gid] = averageDistance;
+    debugHits[gid] = hitCount;
 }
 )";
-
 const char meshmapping_comp[] = 
 R"(
 #version 430 core
@@ -610,7 +809,6 @@ r_coords[gid] = vec4(t, bcoord.x, bcoord.y, bcoord.z);
 r_tidx[gid] = tidx;
 }
 )";
-
 const char meshmapping_nobackfaces_comp[] = 
 R"(
 #version 430 core
@@ -796,7 +994,6 @@ r_coords[gid] = vec4(t, bcoord.x, bcoord.y, bcoord.z);
 r_tidx[gid] = tidx;
 }
 )";
-
 const char normals_comp[] = 
 R"(
 #version 430 core
@@ -823,7 +1020,6 @@ results[ridx + 1] = normal.y;
 results[ridx + 2] = normal.z;
 }
 )";
-
 const char positions_comp[] = 
 R"(
 #version 430 core
@@ -852,7 +1048,6 @@ results[ridx + 1] = p.y;
 results[ridx + 2] = p.z;
 }
 )";
-
 const char tangentspace_comp[] = 
 R"(
 #version 430 core
@@ -888,7 +1083,6 @@ results[result_idx].y = normal.y;
 results[result_idx].z = normal.z;
 }
 )";
-
 const char thick_step1_comp[] = 
 R"(
 #version 430 core
@@ -1035,7 +1229,6 @@ float t = raycastBVH(o, sampleDir, params.minDistance, params.maxDistance);
 results[out_idx] = (t != FLT_MAX) ? t : params.maxDistance;
 }
 )";
-
 const char thick_step2_comp[] = 
 R"(
 #version 430 core

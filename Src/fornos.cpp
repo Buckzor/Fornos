@@ -232,6 +232,8 @@ bool FornosRunner::start(const FornosParameters &params, std::string &errors)
 		HeightSolver::Params solverParams;
 		solverParams.maxDistance = params.height.maxDistance;
 		solverParams.normalizeOutput = params.height.normalizeOutput;
+		solverParams.sampleCount = (uint32_t)params.height.sampleCount;
+		solverParams.coneAngle = params.height.coneAngle;
 		std::unique_ptr<HeightSolver> solver(new HeightSolver(solverParams));
 		solver->init(compressedMap, meshMapping);
 		_tasks.emplace_back(
