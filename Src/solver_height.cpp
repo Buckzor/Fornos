@@ -1,42 +1,16 @@
-/*
-Copyright 2018 Oscar Sebio Cajaraville
-
-Permission is hereby granted, free of charge, to any person obtaining a copy of
-this software and associated documentation files (the "Software"), to deal in
-the Software without restriction, including without limitation the rights to
-use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
-of the Software, and to permit persons to whom the Software is furnished to do
-so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+//solver_height.cpp
 
 #include "solver_height.h"
-#include "bvh.h"
 #include "compute.h"
 #include "computeshaders.h"
-#include "image.h"
 #include "logging.h"
-#include "math.h"
-#include "mesh.h"
 #include "meshmapping.h"
-#include <vector>
-#include <cmath>
-#include <cstdlib> // For rand()
+#include "image.h"
 #include <cassert>
-#include <iostream>
 
 static const size_t k_groupSize = 64;
 static const size_t k_workPerFrame = 1024 * 128;
+static const size_t k_samplePermCount = 64 * 64;
 
 namespace
 {
@@ -49,101 +23,87 @@ namespace
 	}
 }
 
-float randomFloat()
+void HeightSolver::init(std::shared_ptr<const CompressedMapUV> map, std::shared_ptr<MeshMapping> meshMapping, std::shared_ptr<MeshMapping> lowMeshMapping)
 {
-	return static_cast<float>(rand()) / static_cast<float>(RAND_MAX);
-}
+	_rayProgram = LoadComputeShader_Height_GenData();
+	_heightProgram = LoadComputeShader_Height_Sampling();
+	_avgProgram = LoadComputeShader_Height_Aggregate();
 
-float degreesToRadians(float degrees)
-{
-	return degrees * (PI / 180);
-}
+	_uvMap = map;
+	_meshMapping = meshMapping;
+	_lowMeshMapping = lowMeshMapping;
+	_workCount = ((map->positions.size() + k_groupSize - 1) / k_groupSize) * k_groupSize;
 
-std::vector<Vector4> computeSampleDirections(uint32_t sampleCount, float coneAngleDegrees)
-{
-	std::vector<Vector4> sampleDirs(sampleCount);
-
-	float coneAngleRadians = degreesToRadians(coneAngleDegrees);
-	float cosConeAngle = cosf(coneAngleRadians);
-
-	for (uint32_t i = 0; i < sampleCount; ++i)
 	{
-		// Generate a random direction within the cone
-		// For simplicity, we'll use uniformly distributed random directions within the cone
-		// You might want to use a more sophisticated sampling method for better distribution
-
-		float u1 = randomFloat(); // Function to generate random float between 0 and 1
-		float u2 = randomFloat();
-
-		float theta = acosf(1.0f - u1 + u1 * cosConeAngle);
-		float phi = 2.0f * PI * u2;
-
-		float sinTheta = sinf(theta);
-
-		Vector4 dir;
-		dir.x = sinTheta * cosf(phi);
-		dir.y = sinTheta * sinf(phi);
-		dir.z = cosf(theta);
-		dir.w = 0.0f;
-
-		// Store the direction as a Vector4 (the w component can be unused or set to 0)
-		sampleDirs[i] = dir;
+		ShaderParams params;
+		params.sampleCount = (uint32_t)_params.sampleCount;
+		params.samplePermCount = (uint32_t)k_samplePermCount;
+		params.minDistance = _params.minDistance;
+		params.maxDistance = _params.maxDistance;
+		_paramsCB = std::unique_ptr<ComputeBuffer<ShaderParams> >(
+			new ComputeBuffer<ShaderParams>(params, GL_STATIC_DRAW));
 	}
 
-	return sampleDirs;
-}
+	auto samples = computeSamples(_params.sampleCount, k_samplePermCount);
+	std::vector<Vector4> samplesData(samples.begin(), samples.end());
+	_samplesCB = std::unique_ptr<ComputeBuffer<Vector4> >(
+		new ComputeBuffer<Vector4>(&samplesData[0], samplesData.size(), GL_STATIC_DRAW));
 
-void HeightSolver::init(std::shared_ptr<const CompressedMapUV> map, std::shared_ptr<MeshMapping> meshMapping)
-{
-    _heightProgram = LoadComputeShader_Height();
-    _uvMap = map;
-    _meshMapping = meshMapping;
-    _workCount = ((map->positions.size() + k_groupSize - 1) / k_groupSize) * k_groupSize;
-    _resultsCB = std::unique_ptr<ComputeBuffer<float>>(
-        new ComputeBuffer<float>(_workCount, GL_STATIC_READ));
-	_debugCB = std::unique_ptr<ComputeBuffer<uint32_t>>(
-		new ComputeBuffer<uint32_t>(_workCount, GL_STATIC_READ));
-    _workOffset = 0;
+	_rayDataCB = std::unique_ptr<ComputeBuffer<RayData> >(
+		new ComputeBuffer<RayData>(k_workPerFrame / _params.sampleCount, GL_STATIC_READ));
+	_resultsMiddleCB = std::unique_ptr<ComputeBuffer<float> >(
+		new ComputeBuffer<float>(k_workPerFrame, GL_STATIC_READ)); // TODO: static read?
+	_resultsFinalCB = std::unique_ptr<ComputeBuffer<float> >(
+		new ComputeBuffer<float>(_workCount, GL_STATIC_READ));
 
-	// Generate sample directions
-	auto sampleDirs = computeSampleDirections(_params.sampleCount, _params.coneAngle);
-	_samplesCB = std::unique_ptr<ComputeBuffer<Vector4>>(
-		new ComputeBuffer<Vector4>(&sampleDirs[0], sampleDirs.size(), GL_STATIC_DRAW));
+	_workOffset = 0;
 }
 
 bool HeightSolver::runStep()
 {
-	assert(_workOffset < _workCount);
-	const size_t workLeft = _workCount - _workOffset;
+	const size_t totalWork = _workCount * _params.sampleCount;
+	assert(_workOffset < totalWork);
+	const size_t workLeft = totalWork - _workOffset;
 	const size_t work = workLeft < k_workPerFrame ? workLeft : k_workPerFrame;
 	assert(work % k_groupSize == 0);
 
 	if (_workOffset == 0) _timing.begin();
 
+	glUseProgram(_rayProgram);
+	glUniform1ui(1, GLuint(_workOffset / _params.sampleCount));
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, _lowMeshMapping->meshPositions()->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, _lowMeshMapping->meshNormals()->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, _lowMeshMapping->coords()->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, _lowMeshMapping->coords_tidx()->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, _rayDataCB->bo());
+	glDispatchCompute((GLuint)(work / _params.sampleCount / k_groupSize), 1, 1);
+
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
 	glUseProgram(_heightProgram);
-
-	// Set uniforms
-	glUniform1ui(1, (GLuint)_workOffset);           // workOffset
-	glUniform1ui(2, _params.sampleCount);           // sampleCount
-	glUniform1f(3, _params.maxDistance);            // maxDistance
-	glUniform1f(4, _params.coneAngle);              // coneAngleDegrees
-	glUniform1ui(5, (GLuint)_meshMapping->meshBVH()->size()); // bvhCount
-
-	// Bind buffers
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, _meshMapping->coords()->bo());      // coordsBuffer
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, _resultsCB->bo());                  // resultBuffer
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, _samplesCB->bo());                  // samplesBuffer
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, _meshMapping->meshPositions()->bo()); // meshPBuffer
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, _meshMapping->meshBVH()->bo());     // bvhBuffer
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, _meshMapping->meshNormals()->bo()); // meshNBuffer
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, _debugCB->bo()); // debugBuffer
-
-	// Dispatch compute shader
+	glUniform1ui(1, GLuint(_workOffset / _params.sampleCount));
+	glUniform1ui(2, (GLuint)_meshMapping->meshBVH()->size());
+	glUniform1ui(3, (GLuint)_lowMeshMapping->meshBVH()->size());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, _paramsCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, _meshMapping->meshPositions()->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 5, _meshMapping->meshBVH()->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 6, _samplesCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 7, _rayDataCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 8, _resultsMiddleCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 9, _lowMeshMapping->meshPositions()->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 10, _lowMeshMapping->meshBVH()->bo());
 	glDispatchCompute((GLuint)(work / k_groupSize), 1, 1);
+
+	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
+	glUseProgram(_avgProgram);
+	glUniform1ui(1, GLuint(_workOffset / _params.sampleCount));
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, _paramsCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 3, _resultsMiddleCB->bo());
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 4, _resultsFinalCB->bo());
+	glDispatchCompute((GLuint)(work / _params.sampleCount / k_groupSize), 1, 1);
 
 	_workOffset += work;
 
-	if (_workOffset >= _workCount)
+	if (_workOffset >= totalWork)
 	{
 		_timing.end();
 		logDebug("Height",
@@ -151,48 +111,17 @@ bool HeightSolver::runStep()
 			" seconds for " + std::to_string(_uvMap->width) + "x" + std::to_string(_uvMap->height));
 	}
 
-	return _workOffset >= _workCount;
+	return _workOffset >= totalWork;
 }
 
 float* HeightSolver::getResults()
 {
-	assert(_workOffset == _workCount);
+	//assert(_sampleIndex >= _params.sampleCount);
 	glMemoryBarrier(GL_SHADER_STORAGE_BARRIER_BIT);
-
-	// Read back the results buffer
-	float* results = new float[_workCount];
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, _resultsCB->bo());
-	glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(float) * _workCount, results);
-
-	// Read back the debug buffer
-	uint32_t* hitCounts = new uint32_t[_workCount];
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, _debugCB->bo());
-	glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(uint32_t) * _workCount, hitCounts);
-
-	// Log the first few hitCounts using logDebug
-	std::string hitCountsLog = "Hit counts for the first 10 pixels:";
-	for (size_t i = 0; i < 100 && i < _workCount; ++i)
-	{
-		hitCountsLog += "\nPixel " + std::to_string(i) + ": " + std::to_string(hitCounts[i]);
-	}
-	logDebug("Height", hitCountsLog);
-
-	// Optionally, you can log summary statistics
-	size_t totalHits = 0;
-	for (size_t i = 0; i < _workCount; ++i)
-	{
-		totalHits += hitCounts[i];
-	}
-	float averageHits = static_cast<float>(totalHits) / _workCount;
-	logDebug("Height", "Average hit count per pixel: " + std::to_string(averageHits));
-
-	delete[] hitCounts;
-
-	return results;
+	return _resultsFinalCB->readData();
 }
 
-
-HeightTask::HeightTask(std::unique_ptr<HeightSolver> solver, const char *outputPath, int dilation)
+HeightTask::HeightTask(std::unique_ptr<HeightSolver> solver, const char* outputPath, int dilation)
 	: _solver(std::move(solver))
 	, _outputPath(outputPath)
 	, _dilation(dilation)
@@ -212,23 +141,14 @@ bool HeightTask::runStep()
 void HeightTask::finish()
 {
 	assert(_solver);
-	float *results = _solver->getResults();
-	auto map = _solver->uvMap();
+	float* results = _solver->getResults();
 	Vector2 minmax;
-	exportFloatImage(
-		results,
-		_solver->uvMap().get(),
-		_outputPath.c_str(),
-		Vector2(0, _solver->parameters().maxDistance),
-		_solver->parameters().normalizeOutput, 
-		_dilation, 
-		&minmax);
+	exportFloatImage(results, _solver->uvMap().get(), _outputPath.c_str(), Vector2(0, 0), true, _dilation, &minmax);
 	delete[] results;
 	logDebug("Height", "Height map range: " + std::to_string(minmax.x) + " to " + std::to_string(minmax.y));
 }
 
 float HeightTask::progress() const
 {
-	assert(_solver);
 	return _solver->progress();
 }

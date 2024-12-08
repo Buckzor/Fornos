@@ -52,12 +52,11 @@ struct FornosParameters_Shared
 
 struct FornosParameters_SolverHeight
 {
-	bool enabled = false;
+	bool enabled = true;
+	int sampleCount = 256;
+	float minDistance = 1.0f;
+	float maxDistance = 1000.0f;
 	std::string outputPath;
-	bool normalizeOutput = true;
-	float maxDistance = 0.0f;
-	int sampleCount = 1;
-	float coneAngle = 0.0f;
 
 	bool ready() { return enabled && !outputPath.empty(); }
 };
@@ -81,7 +80,7 @@ struct FornosParameters_SolverNormals
 
 struct FornosParameters_SolverAO
 {
-	bool enabled = true;
+	bool enabled = false;
 	int sampleCount = 256;
 	float minDistance = 0.01f;
 	float maxDistance = 10.0f;

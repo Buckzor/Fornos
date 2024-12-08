@@ -419,19 +419,12 @@ void FornosParameters_SolverHeight_View::render(int windowWidth, int windowHeigh
 			"Height Map", ".png;.tga;.exr",
 			windowWidth, windowHeight);
 
-		parameter("Normalize output", &data->normalizeOutput, "##heightNormalizeOutput",
-			"Normalizes the texture output (values between 0 and 1)");
-
-		parameter("Max distance", &data->maxDistance, "##heightMaxDistance",
-			"Max distance to consider occluders.");
-
 		parameter("Sample count", &data->sampleCount, "##heightSampleCount",
-			"Multiple Samples for emulating Sub-Surface Scattering");
-
-		parameter("Cone Spread Angle", &data->coneAngle, "##heightConeAngle",
-			"Sampling Cone Angle");
-
-
+			"Number of samples.\nLarger = better & slower.");
+		parameter("Min distance", &data->minDistance, "##heightMinDistance",
+			"Collisions closer than this value are ignored.");
+		parameter("Max distance", &data->maxDistance, "##heightMaxDistance",
+			"Full height at this distance.");
 
 		parameters_end();
 
@@ -832,7 +825,6 @@ void FornosUI_Impl::renderParameters(int windowWidth, int windowHeight)
 	_paramsSolverThicknessView.render(windowWidth, windowHeight);
 
 	const bool readyToBake =
-		_params.thickness.ready() ||
 		_params.height.ready() ||
 		_params.positions.ready() ||
 		_params.normals.ready() ||

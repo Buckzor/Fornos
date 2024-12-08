@@ -156,10 +156,15 @@ bool FornosRunner::start(const FornosParameters &params, std::string &errors)
 	}
 	std::shared_ptr<CompressedMapUV> compressedMap(new CompressedMapUV(map.get()));
 
+	//High Poly Mesh
 	std::shared_ptr<BVH> rootBVH(BVH::createBinary(hiPolyMesh.get(), params.shared.bvhTrisPerNode, 8192));
-
 	std::shared_ptr<MeshMapping> meshMapping(new MeshMapping());
 	meshMapping->init(compressedMap, hiPolyMesh, rootBVH, params.shared.ignoreBackfaces);
+
+	//Low Poly Mesh
+	std::shared_ptr<BVH> lowRootBVH(BVH::createBinary(lowPolyMesh.get(), params.shared.bvhTrisPerNode, 8192));
+	std::shared_ptr<MeshMapping> lowMeshMapping(new MeshMapping());
+	lowMeshMapping->init(compressedMap, lowPolyMesh, lowRootBVH, params.shared.ignoreBackfaces);
 
 	if (params.thickness.enabled)
 	{
@@ -171,6 +176,19 @@ bool FornosRunner::start(const FornosParameters &params, std::string &errors)
 		solver->init(compressedMap, meshMapping);
 		_tasks.emplace_back(
 			new ThicknessTask(std::move(solver), params.thickness.outputPath.c_str(), params.shared.texDilation)
+		);
+	}
+
+	if (params.height.enabled)
+	{
+		HeightSolver::Params solverParams;
+		solverParams.sampleCount = (uint32_t)params.height.sampleCount;
+		solverParams.minDistance = params.height.minDistance;
+		solverParams.maxDistance = params.height.maxDistance;
+		std::unique_ptr<HeightSolver> solver(new HeightSolver(solverParams));
+		solver->init(compressedMap, meshMapping, lowMeshMapping);
+		_tasks.emplace_back(
+			new HeightTask(std::move(solver), params.height.outputPath.c_str(), params.shared.texDilation)
 		);
 	}
 
@@ -227,21 +245,8 @@ bool FornosRunner::start(const FornosParameters &params, std::string &errors)
 		);
 	}
 
-	if (params.height.enabled)
-	{
-		HeightSolver::Params solverParams;
-		solverParams.maxDistance = params.height.maxDistance;
-		solverParams.normalizeOutput = params.height.normalizeOutput;
-		solverParams.sampleCount = (uint32_t)params.height.sampleCount;
-		solverParams.coneAngle = params.height.coneAngle;
-		std::unique_ptr<HeightSolver> solver(new HeightSolver(solverParams));
-		solver->init(compressedMap, meshMapping);
-		_tasks.emplace_back(
-			new HeightTask(std::move(solver), params.height.outputPath.c_str(), params.shared.texDilation)
-		);
-	}
-
 	_tasks.emplace_back(new MeshMappingTask(meshMapping));
+	_tasks.emplace_back(new MeshMappingTask(lowMeshMapping));
 
 	return true;
 }

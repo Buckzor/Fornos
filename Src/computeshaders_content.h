@@ -297,10 +297,6 @@ layout(std430, binding = 7) readonly buffer inputsBuffer { Input inputs[]; };
 layout(std430, binding = 8) writeonly buffer resultAccBuffer { vec3 results[]; };
 float RayAABB(vec3 o, vec3 d, vec3 mins, vec3 maxs)
 {
- 
- 
- 
- 
 vec3 t1 = (mins - o) / d;
 vec3 t2 = (maxs - o) / d;
 vec3 tmin = min(t1, t2);
@@ -311,19 +307,18 @@ return (b >= 0 && a <= b) ? a : FLT_MAX;
 }
 vec3 barycentric(vec3 p, vec3 a, vec3 b, vec3 c)
 {
-vec3 v0 = b - a;
-vec3 v1 = c - a;
-vec3 v2 = p - a;
-float d00 = dot(v0, v0);
-float d01 = dot(v0, v1);
-float d11 = dot(v1, v1);
-float d20 = dot(v2, v0);
-float d21 = dot(v2, v1);
-float denom = d00 * d11 - d01 * d01;
- 
-float y = (d11 * d20 - d01 * d21) / denom;
-float z = (d00 * d21 - d01 * d20) / denom;
-return vec3(1.0 - y - z, y, z);
+    vec3 v0 = b - a;
+    vec3 v1 = c - a;
+    vec3 v2 = p - a;
+    float d00 = dot(v0, v0);
+    float d01 = dot(v0, v1);
+    float d11 = dot(v1, v1);
+    float d20 = dot(v2, v0);
+    float d21 = dot(v2, v1);
+    float denom = d00 * d11 - d01 * d01;
+    float y = (d11 * d20 - d01 * d21) / denom;
+    float z = (d00 * d21 - d01 * d20) / denom;
+    return vec3(1.0 - y - z, y, z);
 }
  
 float raycast(vec3 o, vec3 d, vec3 a, vec3 b, vec3 c)
@@ -403,7 +398,7 @@ vec3 d = idata.d;
 vec3 tx = idata.tx;
 vec3 ty = idata.ty;
 uint sidx = (pix_idx % params.samplePermCount) * params.sampleCount + sample_idx;
-vec3 rs = samples[sidx];
+vec3 rs = samples[sidx]*0.0;
 vec3 sampleDir = normalize(tx * rs.x + ty * rs.y + d * rs.z);
 float t = raycastBVH(o, sampleDir, params.minDistance, params.maxDistance);
 results[out_idx] = (t != FLT_MAX) ? vec3(0,0,0) : sampleDir;
@@ -443,25 +438,87 @@ results[result_idx].y = normal.y;
 results[result_idx].z = normal.z;
 }
 )";
-
-const char heights_comp[] = 
+const char height_step0_comp[] =
 R"(
 #version 430 core
 #extension GL_ARB_compute_shader : enable
 #extension GL_ARB_shader_storage_buffer_object : enable
 
+layout (local_size_x = 64) in;
+
+struct Output {
+    vec3 o;  // Ray origin
+    vec3 d;  // Ray direction
+    vec3 tx; // Tangent direction for sampling
+    vec3 ty; // Bitangent direction for sampling
+};
+
+layout(location = 1) uniform uint pixOffset;
+layout(std430, binding = 2) readonly buffer meshPBuffer { vec3 positions[]; };
+layout(std430, binding = 3) readonly buffer meshNBuffer { vec3 normals[]; };
+layout(std430, binding = 4) readonly buffer coordsBuffer { vec4 coords[]; };
+layout(std430, binding = 5) readonly buffer coordsTidxBuffer { uint coords_tidx[]; };
+layout(std430, binding = 6) writeonly buffer outputBuffer { Output outputs[]; };
+
+vec3 getPosition(uint tidx, vec3 bcoord) {
+    vec3 p0 = positions[tidx + 0];
+    vec3 p1 = positions[tidx + 1];
+    vec3 p2 = positions[tidx + 2];
+    return bcoord.x * p0 + bcoord.y * p1 + bcoord.z * p2;
+}
+
+vec3 getNormal(uint tidx, vec3 bcoord) {
+    vec3 n0 = normals[tidx + 0];
+    vec3 n1 = normals[tidx + 1];
+    vec3 n2 = normals[tidx + 2];
+    return normalize(bcoord.x * n0 + bcoord.y * n1 + bcoord.z * n2);
+}
+
+void main() {
+    uint in_idx = gl_GlobalInvocationID.x + pixOffset;
+    uint out_idx = gl_GlobalInvocationID.x;
+
+    vec4 coord = coords[in_idx];
+    uint tidx = coords_tidx[in_idx];
+
+    // Calculate ray origin and normal direction from the low-poly mesh
+    vec3 o = getPosition(tidx, coord.yzw);
+    vec3 d = getNormal(tidx, coord.yzw); // Ray direction follows the normal direction (inwards)
+
+    // Increase the small offset along the opposite of the normal to ensure the ray starts slightly inside the mesh
+    const float epsilon = 0.01;  // Offset to start the ray just inside the mesh surface
+    vec3 rayOrigin = o - epsilon * d;
+
+    // Calculate tangent and bitangent vectors
+    vec3 ty = normalize(abs(d.x) > abs(d.y) ? vec3(d.z, 0, -d.x) : vec3(0, d.z, -d.y));
+    vec3 tx = normalize(cross(d, ty));
+
+    // Write output
+    outputs[out_idx].o = rayOrigin;  // Use the adjusted ray origin (slightly inside)
+    outputs[out_idx].d = -d;         // Invert direction to point towards the mesh interior
+    outputs[out_idx].tx = tx;
+    outputs[out_idx].ty = ty;
+}
+)";
+
+const char height_step1_comp[] =
+R"(
+#version 430 core
+#extension GL_ARB_compute_shader : enable
+#extension GL_ARB_shader_storage_buffer_object : enable
+
+layout (local_size_x = 64) in;
+
 #define FLT_MAX 3.402823466e+38
 
-layout(local_size_x = 64) in;
+struct Params {
+    uint sampleCount;  
+    uint samplePermCount;
+    float minDistance;
+    float maxDistance;
+};
 
-layout(location = 1) uniform uint workOffset;
-layout(location = 2) uniform uint sampleCount;
-layout(location = 3) uniform float maxDistance;
-layout(location = 4) uniform float coneAngleDegrees;
-layout(location = 5) uniform uint bvhCount;
-
-struct BVH
-{
+struct BVH {
     float aabbMinX; float aabbMinY; float aabbMinZ;
     float aabbMaxX; float aabbMaxY; float aabbMaxZ;
     uint start;
@@ -469,69 +526,86 @@ struct BVH
     uint jump;  
 };
 
-layout(std430, binding = 2) readonly buffer coordsBuffer { vec4 coords[]; };
-layout(std430, binding = 3) writeonly buffer resultBuffer { float results[]; };
-layout(std430, binding = 4) readonly buffer meshPBuffer { vec3 positions[]; };
-layout(std430, binding = 5) readonly buffer bvhBuffer { BVH bvhs[]; };
-layout(std430, binding = 6) readonly buffer meshNBuffer { vec3 normals[]; };
-layout(std430, binding = 8) writeonly buffer debugBuffer { uint debugHits[]; };
+struct Input {
+    vec3 o;
+    vec3 d;
+    vec3 tx;
+    vec3 ty;
+};
 
+layout(location = 1) uniform uint pixOffset;
+layout(location = 2) uniform uint highBvhCount;
+layout(location = 3) uniform uint lowBvhCount;
 
-// Include any other necessary structs or definitions for raycasting
+layout(std430, binding = 3) readonly buffer paramsBuffer { Params params; };
+layout(std430, binding = 4) readonly buffer highMeshPBuffer { vec3 highPositions[]; };
+layout(std430, binding = 5) readonly buffer highBvhBuffer { BVH highBvhs[]; };
+layout(std430, binding = 6) readonly buffer samplesBuffer { vec3 samples[]; };
+layout(std430, binding = 7) readonly buffer inputsBuffer { Input inputs[]; };
+layout(std430, binding = 8) writeonly buffer resultAccBuffer { float results[]; };
+layout(std430, binding = 9) readonly buffer lowMeshPBuffer { vec3 lowPositions[]; };
+layout(std430, binding = 10) readonly buffer lowBvhBuffer { BVH lowBvhs[]; };
 
-// Function to create a coordinate system
-void createCoordinateSystem(vec3 N, out vec3 T, out vec3 B)
+// Barycentric function to determine the barycentric coordinates of point p
+vec3 barycentric(vec3 p, vec3 a, vec3 b, vec3 c)
 {
-    if (abs(N.x) > abs(N.y))
-        T = normalize(vec3(N.z, 0.0, -N.x));
-    else
-        T = normalize(vec3(0.0, -N.z, N.y));
-    B = cross(N, T);
+    vec3 v0 = b - a;
+    vec3 v1 = c - a;
+    vec3 v2 = p - a;
+    float d00 = dot(v0, v0);
+    float d01 = dot(v0, v1);
+    float d11 = dot(v1, v1);
+    float d20 = dot(v2, v0);
+    float d21 = dot(v2, v1);
+    float denom = d00 * d11 - d01 * d01;
+    float y = (d11 * d20 - d01 * d21) / denom;
+    float z = (d00 * d21 - d01 * d20) / denom;
+    return vec3(1.0 - y - z, y, z);
 }
 
-// Function to perform ray-AABB intersection
 float RayAABB(vec3 o, vec3 d, vec3 mins, vec3 maxs)
 {
-    vec3 invD = 1.0 / d;
-    vec3 t0s = (mins - o) * invD;
-    vec3 t1s = (maxs - o) * invD;
-    vec3 tsmaller = min(t0s, t1s);
-    vec3 tbigger = max(t0s, t1s);
-    float tmin = max(max(tsmaller.x, tsmaller.y), tsmaller.z);
-    float tmax = min(min(tbigger.x, tbigger.y), tbigger.z);
-    return (tmax >= max(tmin, 0.0)) ? tmin : FLT_MAX;
+    vec3 t1 = (mins - o) / d;
+    vec3 t2 = (maxs - o) / d;
+    vec3 tmin = min(t1, t2);
+    vec3 tmax = max(t1, t2);
+    float a = max(tmin.x, max(tmin.y, tmin.z));
+    float b = min(tmax.x, min(tmax.y, tmax.z));
+    return (b >= 0 && a <= b) ? a : FLT_MAX;
 }
 
-// Function to perform ray-triangle intersection
-float rayTriangleIntersect(vec3 o, vec3 d, vec3 v0, vec3 v1, vec3 v2)
+float raycast(vec3 o, vec3 d, vec3 a, vec3 b, vec3 c)
 {
-    vec3 e1 = v1 - v0;
-    vec3 e2 = v2 - v0;
-    vec3 pvec = cross(d, e2);
-    float det = dot(e1, pvec);
-    if (abs(det) < 1e-8) return FLT_MAX;
-    float invDet = 1.0 / det;
-    vec3 tvec = o - v0;
-    float u = dot(tvec, pvec) * invDet;
-    if (u < 0.0 || u > 1.0) return FLT_MAX;
-    vec3 qvec = cross(tvec, e1);
-    float v = dot(d, qvec) * invDet;
-    if (v < 0.0 || u + v > 1.0) return FLT_MAX;
-    float t = dot(e2, qvec) * invDet;
-    return (t >= 0.0) ? t : FLT_MAX;
+    vec3 n = normalize(cross(b - a, c - a));
+    float nd = dot(d, n);
+    if (abs(nd) > 0.0001)  // Adding a small epsilon to avoid numerical issues
+    {
+        float pn = dot(o, n);
+        float t = (dot(a, n) - pn) / nd;
+        const float bias = 0.01; // Increase bias to avoid self-intersection
+        if (t >= bias)  // Ensure we skip very close intersections to origin
+        {
+            vec3 p = o + d * t;
+            vec3 bCoord = barycentric(p, a, b, c);
+            if (bCoord.x >= 0 && bCoord.y >= 0 && bCoord.y <= 1 && bCoord.z >= 0 && bCoord.z <= 1)
+            {
+                return t;
+            }
+        }
+    }
+    return FLT_MAX;
 }
 
-// Function to test ray against triangles in a range
-float raycastRange(vec3 o, vec3 d, uint start, uint end, float mindist)
+float raycastRange(vec3 o, vec3 d, uint start, uint end, float mindist, bool useHighMesh)
 {
     float mint = FLT_MAX;
-    for (uint idx = start; idx < end; idx += 3)
+    for (uint tidx = start; tidx < end; tidx += 3)
     {
-        vec3 v0 = positions[idx + 0];
-        vec3 v1 = positions[idx + 1];
-        vec3 v2 = positions[idx + 2];
-        float t = rayTriangleIntersect(o, d, v0, v1, v2);
-        if (t > mindist && t < mint)
+        vec3 v0 = useHighMesh ? highPositions[tidx + 0] : lowPositions[tidx + 0];
+        vec3 v1 = useHighMesh ? highPositions[tidx + 1] : lowPositions[tidx + 1];
+        vec3 v2 = useHighMesh ? highPositions[tidx + 2] : lowPositions[tidx + 2];
+        float t = raycast(o, d, v0, v1, v2);
+        if (t >= mindist && t < mint)
         {
             mint = t;
         }
@@ -539,130 +613,107 @@ float raycastRange(vec3 o, vec3 d, uint start, uint end, float mindist)
     return mint;
 }
 
-// Function to traverse the BVH and perform ray intersections
-float raycastBVH(vec3 o, vec3 d, float mindist, float maxdist)
+float raycastBVH(vec3 o, vec3 d, float mindist, float maxdist, bool useHighMesh)
 {
     float mint = FLT_MAX;
-    uint stack[64];
-    int stackPtr = 0;
-    stack[stackPtr++] = 0; // Start with root node
+    uint i = 0;
+    uint bvhCount = useHighMesh ? highBvhCount : lowBvhCount;
 
-    while (stackPtr > 0)
+    while (i < bvhCount)
     {
-        uint i = stack[--stackPtr];
-        BVH bvh = bvhs[i];
+        BVH bvh = useHighMesh ? highBvhs[i] : lowBvhs[i];
         vec3 aabbMin = vec3(bvh.aabbMinX, bvh.aabbMinY, bvh.aabbMinZ);
         vec3 aabbMax = vec3(bvh.aabbMaxX, bvh.aabbMaxY, bvh.aabbMaxZ);
         float distAABB = RayAABB(o, d, aabbMin, aabbMax);
         if (distAABB < mint && distAABB < maxdist)
         {
-            if (bvh.end - bvh.start <= 0) // This is a leaf node
+            float t = raycastRange(o, d, bvh.start, bvh.end, mindist, useHighMesh);
+            if (t < mint)
             {
-                float t = raycastRange(o, d, bvh.start, bvh.end, mindist);
-                if (t < mint)
-                {
-                    mint = t;
-                }
+                mint = t;
             }
-            else // Internal node
-            {
-                // Push child nodes onto the stack
-                stack[stackPtr++] = bvh.start;
-                stack[stackPtr++] = bvh.end;
-            }
+            ++i;
+        }
+        else
+        {
+            i = bvh.jump;
         }
     }
     return mint;
 }
 
-// Function to sample directions within a cone
-vec3 importanceSampleCone(vec3 normal, float cosThetaMax, inout uint seed)
-{
-    // Simple random number generator
-    seed = seed * 16807u;
-    float u1 = float(seed % 10000u) / 10000.0;
-    seed = seed * 16807u;
-    float u2 = float(seed % 10000u) / 10000.0;
+void main() {
+    uint in_idx = gl_GlobalInvocationID.x / params.sampleCount;
+    uint pix_idx = in_idx + pixOffset;
+    uint sample_idx = gl_GlobalInvocationID.x % params.sampleCount;
+    uint out_idx = gl_GlobalInvocationID.x;
 
-    float cosTheta = mix(cosThetaMax, 1.0, u1);
-    float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
-    float phi = 2.0 * 3.14159265358979323846 * u2;
+    Input idata = inputs[in_idx];
+    vec3 o = idata.o;  // Starting point on low poly model
+    vec3 d = idata.d;  // Ray direction (opposite to surface normal)
 
-    vec3 sampleDir = vec3(
-        sinTheta * cos(phi),
-        sinTheta * sin(phi),
-        cosTheta
-    );
+    // Calculate the ray direction for sampling (towards the high poly model)
+    vec3 tx = idata.tx;
+    vec3 ty = idata.ty;
+    uint sidx = (pix_idx % params.samplePermCount) * params.sampleCount + sample_idx;
+    vec3 rs = samples[sidx];
+    vec3 sampleDir = normalize(tx * rs.x + ty * rs.y + d * rs.z);
+    sampleDir = mix(sampleDir,d,params.minDistance); // Reducing the sampling spread to avoid excessive blurriness
 
-    vec3 tangent, bitangent;
-    createCoordinateSystem(normal, tangent, bitangent);
+    // Cast the ray to intersect with the high poly mesh (skeleton)
+    float tHigh = raycastBVH(o, sampleDir, 0.0, params.maxDistance, true);
 
-    return normalize(
-        sampleDir.x * tangent +
-        sampleDir.y * bitangent +
-        sampleDir.z * normal
-    );
+    // If no high poly intersection, proceed to check for low poly backface intersection
+    if (tHigh == FLT_MAX) {
+        // Check intersection with low poly backfaces
+        float tLow = raycastBVH(o, sampleDir, 0.0, params.maxDistance, false);
+        if (tLow != FLT_MAX) {
+            // Set the result by inverting the distance to make closer values white
+            results[out_idx] = clamp(1.0 - (tLow / params.maxDistance), 0.0, 1.0);
+        } else {
+            // Set to black (0.0) for no intersection, implying farthest distance.
+            results[out_idx] = 0.0;
+        }
+    } else {
+        // Intersection with high poly mesh
+        // Set the result by inverting the distance to make closer values white
+        results[out_idx] = clamp(1.0 - (tHigh / params.maxDistance), 0.0, 1.0);
+    }
 }
-
-// Raycasting functions (raycastBVH, raycastRange, etc.)
-// You can reuse these from your AO shader, ensuring they are correctly adapted
+)";
+const char height_step2_comp[] =
+R"(
+#version 430 core
+#extension GL_ARB_compute_shader : enable
+#extension GL_ARB_shader_storage_buffer_object : enable
+layout (local_size_x = 64) in;
+struct Params
+{
+    uint sampleCount;  
+    float minDistance;
+    float maxDistance;
+};
+layout(location = 1) uniform uint workOffset;
+layout(std430, binding = 2) readonly buffer paramsBuffer { Params params; };
+layout(std430, binding = 3) readonly buffer dataBuffer { float data[]; };
+layout(std430, binding = 4) writeonly buffer resultAccBuffer { float results[]; };
 
 void main()
 {
-    uint gid = gl_GlobalInvocationID.x + workOffset;
+    uint gid = gl_GlobalInvocationID.x;
+    uint data_start_idx = gid * params.sampleCount;
+    float acc = 0.0;
 
-    // Ensure gid is within bounds
-    if (gid >= coords.length())
-        return;
-
-    vec4 coord = coords[gid];
-    vec3 position = coord.xyz;  // Adjust according to how position is stored
-    vec3 normal = normals[gid]; // Fetch the normal for the current pixel
-
-    float totalDistance = 0.0;
-    uint hitCount = 0;
-
-    // Convert cone angle to radians
-    float coneAngleRadians = radians(coneAngleDegrees);
-    float cosThetaMax = cos(coneAngleRadians);
-
-    uint seed = gid; // Initialize seed
-
-    for (uint i = 0; i < sampleCount; ++i)
+    for (uint i = 0; i < params.sampleCount; ++i)
     {
-        vec3 sampleDir = importanceSampleCone(normal, cosThetaMax, seed);
-
-        // Perform raycast
-        //float t = raycastBVH(position, sampleDir, 0.001, maxDistance);
-
-        float t = FLT_MAX;
-        for (uint idx = 0; idx < positions.length(); idx += 3)
-        {
-            vec3 v0 = positions[idx + 0];
-            vec3 v1 = positions[idx + 1];
-            vec3 v2 = positions[idx + 2];
-            float hit = rayTriangleIntersect(position, sampleDir, v0, v1, v2);
-            if (hit < t)
-            {
-                t = hit;
-            }
-        }
-
-        if (t < maxDistance)
-        {
-            totalDistance += t;
-            hitCount++;
-        }
+        acc += data[data_start_idx + i];
     }
 
-    // Compute average distance
-    float averageDistance = (hitCount > 0) ? (totalDistance / float(hitCount)) : maxDistance;
-
-    results[gid] = averageDistance;
-    debugHits[gid] = hitCount;
+    uint result_idx = gid + workOffset;
+    results[result_idx] = acc / float(params.sampleCount);
 }
 )";
-const char meshmapping_comp[] = 
+const char meshmapping_comp[] =
 R"(
 #version 430 core
 #extension GL_ARB_compute_shader : enable
